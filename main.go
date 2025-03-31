@@ -2,63 +2,109 @@ package main
 
 import (
 	"embed"
-	"github.com/a-h/templ"
-	"log"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 )
 
-//go:embed public
-var publicFS embed.FS
+//go:embed html/build
+var htmlFS embed.FS
+
+var ServerPid int
+
+var server *Server
 
 func main() {
-	xfs := os.DirFS("X:\\YeSMP2")
-	text, err := xfs.Open("user_jvm_args.txt")
+	/*tail := exec.Command("cat", "/var/mc-test/fifo")
+	out, oerr := tail.StdoutPipe()
+	if oerr != nil {
+		panic(oerr)
+	}
+	terr := tail.Start()
+	println(tail.Process.Pid)
+	defer tail.Process.Kill()
+	defer out.Close()
+	if terr != nil {
+		panic(terr)
+	}*/
+
+	java := exec.Command("java", "-jar", "server.jar", "nogui")
+	java.Dir = "/var/mc-test/"
+	//java.Stdin = out
+	jerr := java.Start()
+	defer java.Process.Kill()
+	if jerr != nil {
+		panic(jerr)
+	}
+	println(java.Process.Pid)
+	ServerPid = java.Process.Pid
+
+	http.Handle("GET /", html())
+	http.Handle("GET /logs/", logs())
+	http.HandleFunc("POST /server/start", ServerStart)
+	http.HandleFunc("POST /server/stop", ServerStop)
+	http.HandleFunc("POST /server/command", command)
+
+	println(fmt.Printf("Hosted at http://%s:%s\n", "172.23.80.175", "8080"))
+	panic(http.ListenAndServe(":8080", nil))
+}
+
+func html() http.Handler {
+
+	return http.FileServerFS(htmlFS)
+}
+
+func logs() http.Handler {
+	return http.StripPrefix("/logs/", http.FileServerFS(os.DirFS("/var/mc-test/")))
+}
+
+func command(w http.ResponseWriter, r *http.Request) {
+	var err error
+	if server == nil {
+		http.Error(w, "Server not started", http.StatusInternalServerError)
+		return
+	}
+	if r.Header.Get("Content-Type") != "text/plain" {
+		http.Error(w, "Content-Type not supported", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	b, err := io.ReadAll(r.Body)
+	b = append(b, '\n')
 	if err != nil {
-		panic(err.Error())
+		panic(err)
 	}
-	stat, serr := text.Stat()
-	if serr != nil {
-		panic(serr.Error())
+
+	stdin, err := server.Command.StdinPipe()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	data := make([]byte, stat.Size())
-	text.Read(data)
-	log.Println(string(data))
-	http.Handle("GET /public/", public())
-	http.Handle("GET /", templ.Handler(base.Index()))
-	http.Handle("GET /fs/", xOS())
-	http.ListenAndServe(":8080", nil)
+
+	_, err = io.WriteString(stdin, string(b))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write([]byte(fmt.Sprintf("Sent to server: \n%s", string(b))))
 }
 
-func public() http.Handler {
-	return http.FileServerFS(publicFS)
-}
-func xOS() http.Handler {
-	return http.StripPrefix("/fs/", http.FileServer(http.Dir("X:\\YeSMP2")))
-}
-
-type JavaVersion struct {
-	Version int    `json:"version"`
-	Title   string `json:"title"`
-	Path    string `json:"path"`
+func ServerStart(w http.ResponseWriter, r *http.Request) {
+	err := server.Start()
+	if err != nil {
+		println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
-type ServerType int
-
-const (
-	Vanilla ServerType = iota
-	Forge
-	Fabric
-)
-
-var ServerModloader = map[ServerType]string{
-	Vanilla: "Vanilla",
-	Forge:   "Forge",
-	Fabric:  "Fabric",
-}
-
-type ServerInfo struct {
-	Id         int        `json:"id"`
-	McVersion  string     `json:"mc_version"`
-	ServerType ServerType `json:"server_type"`
+func ServerStop(w http.ResponseWriter, r *http.Request) {
+	err := server.Stop()
+	if err != nil {
+		println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
