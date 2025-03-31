@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -40,6 +42,7 @@ func (server *Server) Stop() error {
 	if err != nil {
 		return err
 	}
+	_ = server.Command.Wait()
 	return nil
 }
 
@@ -57,4 +60,17 @@ func (server *Server) Reload() error {
 		return err
 	}
 	return nil
+}
+
+func (server *Server) ReadLatest() (string, error) {
+	return server.Read("logs/latest.log")
+}
+
+func (server *Server) Read(path string) (string, error) {
+	var err error
+	data, err := os.ReadFile(fmt.Sprintf("%s/%s", server.Path, path))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

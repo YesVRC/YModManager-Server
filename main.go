@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 )
 
 //go:embed html/build
@@ -17,29 +16,8 @@ var ServerPid int
 var server *Server
 
 func main() {
-	/*tail := exec.Command("cat", "/var/mc-test/fifo")
-	out, oerr := tail.StdoutPipe()
-	if oerr != nil {
-		panic(oerr)
-	}
-	terr := tail.Start()
-	println(tail.Process.Pid)
-	defer tail.Process.Kill()
-	defer out.Close()
-	if terr != nil {
-		panic(terr)
-	}*/
-
-	java := exec.Command("java", "-jar", "server.jar", "nogui")
-	java.Dir = "/var/mc-test/"
-	//java.Stdin = out
-	jerr := java.Start()
-	defer java.Process.Kill()
-	if jerr != nil {
-		panic(jerr)
-	}
-	println(java.Process.Pid)
-	ServerPid = java.Process.Pid
+	server = NewServer(os.Getenv("SERVER_PATH"), os.Getenv("SERVER_START_SCRIPT"))
+	defer server.Stop()
 
 	http.Handle("GET /", html())
 	http.Handle("GET /logs/", logs())
